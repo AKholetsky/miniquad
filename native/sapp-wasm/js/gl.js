@@ -393,6 +393,15 @@ texture_size = function (internalFormat, width, height) {
     }
 }
 
+mouse_relative_position = function (clientX, clientY) {
+    var targetRect = canvas.getBoundingClientRect();
+
+    var x = clientX - targetRect.left;
+    var y = clientY - targetRect.top;
+
+    return { x, y };
+}
+
 var emscripten_shaders_hack = false;
 
 var importObject = {
@@ -469,49 +478,49 @@ var importObject = {
         glUniform1fv: function (location, count, value) {
             GL.validateGLObjectID(GL.uniforms, location, 'glUniform1fv', 'location');
             assert((value & 3) == 0, 'Pointer to float data passed to glUniform1fv must be aligned to four bytes!');
-            var view = getArray(value, Float32Array, 1);
+            var view = getArray(value, Float32Array, 1 * count);
             gl.uniform1fv(GL.uniforms[location], view);
         },
         glUniform2fv: function (location, count, value) {
             GL.validateGLObjectID(GL.uniforms, location, 'glUniform2fv', 'location');
             assert((value & 3) == 0, 'Pointer to float data passed to glUniform2fv must be aligned to four bytes!');
-            var view = getArray(value, Float32Array, 2);
+            var view = getArray(value, Float32Array, 2 * count);
             gl.uniform2fv(GL.uniforms[location], view);
         },
         glUniform3fv: function (location, count, value) {
             GL.validateGLObjectID(GL.uniforms, location, 'glUniform3fv', 'location');
             assert((value & 3) == 0, 'Pointer to float data passed to glUniform3fv must be aligned to four bytes!');
-            var view = getArray(value, Float32Array, 3);
+            var view = getArray(value, Float32Array, 4 * count);
             gl.uniform3fv(GL.uniforms[location], view);
         },
         glUniform4fv: function (location, count, value) {
             GL.validateGLObjectID(GL.uniforms, location, 'glUniform4fv', 'location');
             assert((value & 3) == 0, 'Pointer to float data passed to glUniform4fv must be aligned to four bytes!');
-            var view = getArray(value, Float32Array, 4);
+            var view = getArray(value, Float32Array, 4 * count);
             gl.uniform4fv(GL.uniforms[location], view);
         },
         glUniform1iv: function (location, count, value) {
             GL.validateGLObjectID(GL.uniforms, location, 'glUniform1fv', 'location');
             assert((value & 3) == 0, 'Pointer to i32 data passed to glUniform1iv must be aligned to four bytes!');
-            var view = getArray(value, Int32Array, 1);
+            var view = getArray(value, Int32Array, 1 * count);
             gl.uniform1iv(GL.uniforms[location], view);
         },
         glUniform2iv: function (location, count, value) {
             GL.validateGLObjectID(GL.uniforms, location, 'glUniform2fv', 'location');
             assert((value & 3) == 0, 'Pointer to i32 data passed to glUniform2iv must be aligned to four bytes!');
-            var view = getArray(value, Int32Array, 2);
+            var view = getArray(value, Int32Array, 2 * count);
             gl.uniform2iv(GL.uniforms[location], view);
         },
         glUniform3iv: function (location, count, value) {
             GL.validateGLObjectID(GL.uniforms, location, 'glUniform3fv', 'location');
             assert((value & 3) == 0, 'Pointer to i32 data passed to glUniform3iv must be aligned to four bytes!');
-            var view = getArray(value, Int32Array, 3);
+            var view = getArray(value, Int32Array, 3 * count);
             gl.uniform3iv(GL.uniforms[location], view);
         },
         glUniform4iv: function (location, count, value) {
             GL.validateGLObjectID(GL.uniforms, location, 'glUniform4fv', 'location');
             assert((value & 3) == 0, 'Pointer to i32 data passed to glUniform4iv must be aligned to four bytes!');
-            var view = getArray(value, Int32Array, 4);
+            var view = getArray(value, Int32Array, 4 * count);
             gl.uniform4iv(GL.uniforms[location], view);
         },
         glBlendFunc: function (sfactor, dfactor) {
@@ -576,12 +585,6 @@ var importObject = {
         glUseProgram: function (program) {
             GL.validateGLObjectID(GL.programs, program, 'glUseProgram', 'program');
             gl.useProgram(GL.programs[program]);
-        },
-        glUniform4fv: function (location, count, value) {
-            GL.validateGLObjectID(GL.uniforms, location, 'glUniformMatrix4fv', 'location');
-            assert((value & 3) == 0, 'Pointer to float data passed to glUniformMatrix4fv must be aligned to four bytes!');
-            var view = getArray(value, Float32Array, 4);
-            gl.uniform4fv(GL.uniforms[location], view);
         },
         glGenVertexArrays: function (n, arrays) {
             _glGenObject(n, arrays, 'createVertexArray', GL.vaos, 'glGenVertexArrays');
@@ -791,8 +794,9 @@ var importObject = {
         },
         init_opengl: function (ptr) {
             canvas.onmousemove = function (event) {
-                var x = event.clientX;
-                var y = event.clientY;
+                var relative_position = mouse_relative_position(event.clientX, event.clientY);
+                var x = relative_position.x;
+                var y = relative_position.y;
 
                 // TODO: do not send mouse_move when cursor is captured
                 wasm_exports.mouse_move(Math.floor(x), Math.floor(y));
@@ -803,8 +807,10 @@ var importObject = {
                 }
             };
             canvas.onmousedown = function (event) {
-                var x = event.clientX;
-                var y = event.clientY;
+                var relative_position = mouse_relative_position(event.clientX, event.clientY);
+                var x = relative_position.x;
+                var y = relative_position.y;
+
                 var btn = into_sapp_mousebutton(event.button);
                 wasm_exports.mouse_down(x, y, btn);
             };
@@ -814,8 +820,10 @@ var importObject = {
                     wasm_exports.mouse_wheel(-event.deltaX, -event.deltaY);
                 });
             canvas.onmouseup = function (event) {
-                var x = event.clientX;
-                var y = event.clientY;
+                var relative_position = mouse_relative_position(event.clientX, event.clientY);
+                var x = relative_position.x;
+                var y = relative_position.y;
+
                 var btn = into_sapp_mousebutton(event.button);
                 wasm_exports.mouse_up(x, y, btn);
             };
