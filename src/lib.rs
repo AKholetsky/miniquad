@@ -317,6 +317,7 @@ where
 
     let mut user_data = Box::new(UserDataState::Uninitialized(Box::new(f)));
 
+    desc.sample_count = conf.sample_count;
     desc.width = conf.window_width;
     desc.height = conf.window_height;
     desc.fullscreen = conf.fullscreen as _;
