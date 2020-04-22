@@ -7,7 +7,7 @@ use crate::sapp::*;
 // workaround sapp::* also contains None on Android
 use std::option::Option::None;
 
-pub use texture::{FilterMode, Texture, TextureFormat, TextureParams, TextureWrap};
+pub use texture::{FilterMode, Texture, TextureFormat, TextureParams, TextureWrap, TextureAccess};
 
 fn get_uniform_location(program: GLuint, name: &str) -> i32 {
     let cname = CString::new(name).unwrap_or_else(|e| panic!(e));
@@ -253,7 +253,16 @@ struct ShaderInternal {
     uniforms: Vec<ShaderUniform>,
 }
 
-type BlendState = Option<(Equation, BlendFactor, BlendFactor)>;
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct BlendState {
+    eq_rgb: Equation,
+    eq_alpha: Equation,
+    src_rgb: BlendFactor,
+    dst_rgb: BlendFactor,
+    src_alpha: BlendFactor,
+    dst_alpha: BlendFactor,
+}
+
 type ColorMask = (bool, bool, bool, bool);
 
 #[derive(Default, Copy, Clone)]
@@ -270,7 +279,7 @@ struct GlCache {
     vertex_buffer: GLuint,
     textures: [GLuint; MAX_SHADERSTAGE_IMAGES],
     cur_pipeline: Option<Pipeline>,
-    blend: BlendState,
+    blend: Option<BlendState>,
     color_write: ColorMask,
     attributes: [Option<CachedAttribute>; MAX_VERTEX_ATTRIBUTES],
 }
@@ -512,13 +521,13 @@ impl Context {
 
         if self.cache.blend != pipeline.params.color_blend {
             unsafe {
-                if let Some((equation, src, dst)) = pipeline.params.color_blend {
+                if let Some(blend) = pipeline.params.color_blend {
                     if self.cache.blend.is_none() {
                         glEnable(GL_BLEND);
                     }
 
-                    glBlendFunc(src.into(), dst.into());
-                    glBlendEquationSeparate(equation.into(), equation.into());
+                    glBlendFuncSeparate(blend.src_rgb.into(), blend.dst_rgb.into(), blend.src_alpha.into(), blend.dst_alpha.into());
+                    glBlendEquationSeparate(blend.eq_rgb.into(), blend.eq_alpha.into());
                 } else if self.cache.blend.is_some() {
                     glDisable(GL_BLEND);
                 }
@@ -923,6 +932,13 @@ pub enum BlendFactor {
     One,
     Value(BlendValue),
     OneMinusValue(BlendValue),
+    SourceAlphaSaturate,
+}
+
+impl Default for Equation {
+    fn default() -> Equation {
+        Equation::Add
+    }
 }
 
 impl From<Equation> for GLenum {
@@ -948,6 +964,7 @@ impl From<BlendFactor> for GLenum {
             BlendFactor::OneMinusValue(BlendValue::SourceAlpha) => GL_ONE_MINUS_SRC_ALPHA,
             BlendFactor::OneMinusValue(BlendValue::DestinationColor) => GL_ONE_MINUS_DST_COLOR,
             BlendFactor::OneMinusValue(BlendValue::DestinationAlpha) => GL_ONE_MINUS_DST_ALPHA,
+            BlendFactor::SourceAlphaSaturate => GL_SRC_ALPHA_SATURATE,
         }
     }
 }
@@ -959,7 +976,7 @@ pub struct PipelineParams {
     pub depth_test: Comparison,
     pub depth_write: bool,
     pub depth_write_offset: Option<(f32, f32)>,
-    pub color_blend: BlendState,
+    pub color_blend: Option<BlendState>,
     pub color_write: ColorMask,
 }
 
