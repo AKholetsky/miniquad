@@ -7,7 +7,7 @@ use crate::sapp::*;
 // workaround sapp::* also contains None on Android
 use std::option::Option::None;
 
-pub use texture::{FilterMode, Texture, TextureFormat, TextureParams, TextureWrap, TextureAccess};
+pub use texture::{FilterMode, Texture, TextureAccess, TextureFormat, TextureParams, TextureWrap};
 
 fn get_uniform_location(program: GLuint, name: &str) -> i32 {
     let cname = CString::new(name).unwrap_or_else(|e| panic!(e));
@@ -100,6 +100,10 @@ pub enum VertexFormat {
     Short2,
     Short3,
     Short4,
+    Int1,
+    Int2,
+    Int3,
+    Int4,
     Mat4,
 }
 
@@ -118,6 +122,10 @@ impl VertexFormat {
             VertexFormat::Short2 => 2,
             VertexFormat::Short3 => 3,
             VertexFormat::Short4 => 4,
+            VertexFormat::Int1 => 1,
+            VertexFormat::Int2 => 2,
+            VertexFormat::Int3 => 3,
+            VertexFormat::Int4 => 4,
             VertexFormat::Mat4 => 16,
         }
     }
@@ -136,6 +144,10 @@ impl VertexFormat {
             VertexFormat::Short2 => 2 * 2,
             VertexFormat::Short3 => 3 * 2,
             VertexFormat::Short4 => 4 * 2,
+            VertexFormat::Int1 => 1 * 4,
+            VertexFormat::Int2 => 2 * 4,
+            VertexFormat::Int3 => 3 * 4,
+            VertexFormat::Int4 => 4 * 4,
             VertexFormat::Mat4 => 16 * 4,
         }
     }
@@ -154,6 +166,10 @@ impl VertexFormat {
             VertexFormat::Short2 => GL_UNSIGNED_SHORT,
             VertexFormat::Short3 => GL_UNSIGNED_SHORT,
             VertexFormat::Short4 => GL_UNSIGNED_SHORT,
+            VertexFormat::Int1 => GL_UNSIGNED_INT,
+            VertexFormat::Int2 => GL_UNSIGNED_INT,
+            VertexFormat::Int3 => GL_UNSIGNED_INT,
+            VertexFormat::Int4 => GL_UNSIGNED_INT,
             VertexFormat::Mat4 => GL_FLOAT,
         }
     }
@@ -196,11 +212,11 @@ pub struct VertexAttribute {
 }
 
 impl VertexAttribute {
-    pub fn new(name: &'static str, format: VertexFormat) -> VertexAttribute {
+    pub const fn new(name: &'static str, format: VertexFormat) -> VertexAttribute {
         Self::with_buffer(name, format, 0)
     }
 
-    pub fn with_buffer(
+    pub const fn with_buffer(
         name: &'static str,
         format: VertexFormat,
         buffer_index: usize,
@@ -255,12 +271,73 @@ struct ShaderInternal {
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct BlendState {
-    eq_rgb: Equation,
-    eq_alpha: Equation,
-    src_rgb: BlendFactor,
-    dst_rgb: BlendFactor,
-    src_alpha: BlendFactor,
-    dst_alpha: BlendFactor,
+    pub eq_rgb: Equation,
+    pub eq_alpha: Equation,
+    pub src_rgb: BlendFactor,
+    pub dst_rgb: BlendFactor,
+    pub src_alpha: BlendFactor,
+    pub dst_alpha: BlendFactor,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct StencilState {
+    pub front: StencilFaceState,
+    pub back: StencilFaceState,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct StencilFaceState {
+    /// Operation to use when stencil test fails
+    pub fail_op: StencilOp,
+
+    /// Operation to use when stencil test passes, but depth test fails
+    pub depth_fail_op: StencilOp,
+
+    /// Operation to use when both stencil and depth test pass,
+    /// or when stencil pass and no depth or depth disabled
+    pub pass_op: StencilOp,
+
+    /// Used for stencil testing with test_ref and test_mask: if (test_ref & test_mask) *test_func* (*stencil* && test_mask)
+    /// Default is Always, which means "always pass"
+    pub test_func: CompareFunc,
+
+    /// Default value: 0
+    pub test_ref: i32,
+
+    /// Default value: all 1s
+    pub test_mask: u32,
+
+    /// Specifies a bit mask to enable or disable writing of individual bits in the stencil planes
+    /// Default value: all 1s
+    pub write_mask: u32,
+}
+
+/// Operations performed on current stencil value when comparison test passes or fails.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum StencilOp {
+    /// Default value
+    Keep,
+    Zero,
+    Replace,
+    IncrementClamp,
+    DecrementClamp,
+    Invert,
+    IncrementWrap,
+    DecrementWrap,
+}
+
+/// Depth and stencil compare function
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum CompareFunc {
+    /// Default value
+    Always,
+    Never,
+    Less,
+    Equal,
+    LessOrEqual,
+    Greater,
+    NotEqual,
+    GreaterOrEqual,
 }
 
 type ColorMask = (bool, bool, bool, bool);
@@ -280,6 +357,7 @@ struct GlCache {
     textures: [GLuint; MAX_SHADERSTAGE_IMAGES],
     cur_pipeline: Option<Pipeline>,
     blend: Option<BlendState>,
+    stencil: Option<StencilState>,
     color_write: ColorMask,
     attributes: [Option<CachedAttribute>; MAX_VERTEX_ATTRIBUTES],
 }
@@ -467,6 +545,7 @@ impl Context {
                     vertex_buffer: 0,
                     cur_pipeline: None,
                     blend: None,
+                    stencil: None,
                     color_write: (true, true, true, true),
                     stored_texture: 0,
                     textures: [0; MAX_SHADERSTAGE_IMAGES],
@@ -498,49 +577,138 @@ impl Context {
     pub fn apply_pipeline(&mut self, pipeline: &Pipeline) {
         self.cache.cur_pipeline = Some(*pipeline);
 
-        let pipeline = &mut self.pipelines[pipeline.0];
-        let shader = &mut self.shaders[pipeline.shader.0];
-        unsafe {
-            glUseProgram(shader.program);
-        }
-
-        unsafe {
-            glEnable(GL_SCISSOR_TEST);
-        }
-
-        if pipeline.params.depth_write {
+        {
+            let pipeline = &self.pipelines[pipeline.0];
+            let shader = &mut self.shaders[pipeline.shader.0];
             unsafe {
-                glEnable(GL_DEPTH_TEST);
-                glDepthFunc(pipeline.params.depth_test.into())
+                glUseProgram(shader.program);
             }
-        } else {
+
             unsafe {
-                glDisable(GL_DEPTH_TEST);
+                glEnable(GL_SCISSOR_TEST);
             }
-        }
 
-        if self.cache.blend != pipeline.params.color_blend {
-            unsafe {
-                if let Some(blend) = pipeline.params.color_blend {
-                    if self.cache.blend.is_none() {
-                        glEnable(GL_BLEND);
-                    }
-
-                    glBlendFuncSeparate(blend.src_rgb.into(), blend.dst_rgb.into(), blend.src_alpha.into(), blend.dst_alpha.into());
-                    glBlendEquationSeparate(blend.eq_rgb.into(), blend.eq_alpha.into());
-                } else if self.cache.blend.is_some() {
-                    glDisable(GL_BLEND);
+            if pipeline.params.depth_write {
+                unsafe {
+                    glEnable(GL_DEPTH_TEST);
+                    glDepthFunc(pipeline.params.depth_test.into())
                 }
+            } else {
+                unsafe {
+                    glDisable(GL_DEPTH_TEST);
+                }
+            }
 
-                self.cache.blend = pipeline.params.color_blend;
+            match pipeline.params.cull_face {
+                CullFace::Nothing => unsafe {
+                    glDisable(GL_CULL_FACE);
+                },
+                CullFace::Front => unsafe {
+                    glEnable(GL_CULL_FACE);
+                    glCullFace(GL_FRONT);
+                },
+                CullFace::Back => unsafe {
+                    glEnable(GL_CULL_FACE);
+                    glCullFace(GL_BACK);
+                },
+            }
+
+            match pipeline.params.front_face_order {
+                FrontFaceOrder::Clockwise => unsafe {
+                    glFrontFace(GL_CW);
+                },
+                FrontFaceOrder::CounterClockwise => unsafe {
+                    glFrontFace(GL_CCW);
+                },
             }
         }
 
+        if self.cache.blend != self.pipelines[pipeline.0].params.color_blend {
+            self.set_blend(self.pipelines[pipeline.0].params.color_blend);
+        }
+
+        if self.cache.stencil != self.pipelines[pipeline.0].params.stencil_test {
+            self.set_stencil(self.pipelines[pipeline.0].params.stencil_test);
+        }
+
+        let pipeline = &self.pipelines[pipeline.0];
         if self.cache.color_write != pipeline.params.color_write {
             let (r, g, b, a) = pipeline.params.color_write;
             unsafe { glColorMask(r as _, g as _, b as _, a as _) }
             self.cache.color_write = pipeline.params.color_write;
         }
+    }
+
+    pub fn set_blend(&mut self, color_blend: Option<BlendState>) {
+        if self.cache.blend == color_blend {
+            return;
+        }
+        unsafe {
+            if let Some(blend) = color_blend {
+                if self.cache.blend.is_none() {
+                    glEnable(GL_BLEND);
+                }
+
+                glBlendFuncSeparate(
+                    blend.src_rgb.into(),
+                    blend.dst_rgb.into(),
+                    blend.src_alpha.into(),
+                    blend.dst_alpha.into(),
+                );
+                glBlendEquationSeparate(blend.eq_rgb.into(), blend.eq_alpha.into());
+            } else if self.cache.blend.is_some() {
+                glDisable(GL_BLEND);
+            }
+        }
+
+        self.cache.blend = color_blend;
+    }
+
+    pub fn set_stencil(&mut self, stencil_test: Option<StencilState>) {
+        if self.cache.stencil == stencil_test {
+            return;
+        }
+        unsafe {
+            if let Some(stencil) = stencil_test {
+                if self.cache.stencil.is_none() {
+                    glEnable(GL_STENCIL_TEST);
+                }
+
+                let front = &stencil.front;
+                glStencilOpSeparate(
+                    GL_FRONT,
+                    front.fail_op.into(),
+                    front.depth_fail_op.into(),
+                    front.pass_op.into(),
+                );
+                glStencilFuncSeparate(
+                    GL_FRONT,
+                    front.test_func.into(),
+                    front.test_ref,
+                    front.test_mask,
+                );
+                glStencilMaskSeparate(GL_FRONT, front.write_mask);
+
+                let back = &stencil.back;
+                glStencilOpSeparate(
+                    GL_BACK,
+                    back.fail_op.into(),
+                    back.depth_fail_op.into(),
+                    back.pass_op.into(),
+                );
+                glStencilFuncSeparate(
+                    GL_BACK,
+                    back.test_func.into(),
+                    back.test_ref.into(),
+                    back.test_mask,
+                );
+                glStencilMaskSeparate(GL_BACK, back.write_mask);
+            } else if self.cache.blend.is_some() {
+                glDisable(GL_STENCIL_TEST);
+            }
+        }
+
+        self.cache.stencil = stencil_test;
     }
 
     pub fn apply_scissor_rect(&mut self, x: i32, y: i32, w: i32, h: i32) {
@@ -789,9 +957,14 @@ fn load_shader_internal(
                 &mut max_length as *mut _,
                 error_message.as_mut_ptr() as *mut _,
             );
+            // trim trailing zeros
+            while error_message.last().copied() == Some(0) {
+                error_message.pop();
+            }
 
             let error_message = std::string::String::from_utf8_lossy(&error_message);
-            panic!("{}", error_message);
+            eprintln!("Shader link error:\n{}", error_message);
+            panic!("can't link shader");
         }
 
         glUseProgram(program);
@@ -844,6 +1017,10 @@ pub fn load_shader(shader_type: GLenum, source: &str) -> GLuint {
                 &mut max_length as *mut _,
                 error_message.as_mut_ptr() as *mut _,
             );
+            // trim trailing zeros
+            while error_message.last().copied() == Some(0) {
+                error_message.pop();
+            }
 
             #[cfg(target_arch = "wasm32")]
             console_log(error_message.as_ptr() as *const _);
@@ -969,6 +1146,36 @@ impl From<BlendFactor> for GLenum {
     }
 }
 
+impl From<StencilOp> for GLenum {
+    fn from(op: StencilOp) -> Self {
+        match op {
+            StencilOp::Keep => GL_KEEP,
+            StencilOp::Zero => GL_ZERO,
+            StencilOp::Replace => GL_REPLACE,
+            StencilOp::IncrementClamp => GL_INCR,
+            StencilOp::DecrementClamp => GL_DECR,
+            StencilOp::Invert => GL_INVERT,
+            StencilOp::IncrementWrap => GL_INCR_WRAP,
+            StencilOp::DecrementWrap => GL_DECR_WRAP,
+        }
+    }
+}
+
+impl From<CompareFunc> for GLenum {
+    fn from(cf: CompareFunc) -> Self {
+        match cf {
+            CompareFunc::Always => GL_ALWAYS,
+            CompareFunc::Never => GL_NEVER,
+            CompareFunc::Less => GL_LESS,
+            CompareFunc::Equal => GL_EQUAL,
+            CompareFunc::LessOrEqual => GL_LEQUAL,
+            CompareFunc::Greater => GL_GREATER,
+            CompareFunc::NotEqual => GL_NOTEQUAL,
+            CompareFunc::GreaterOrEqual => GL_GEQUAL,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct PipelineParams {
     pub cull_face: CullFace,
@@ -977,6 +1184,7 @@ pub struct PipelineParams {
     pub depth_write: bool,
     pub depth_write_offset: Option<(f32, f32)>,
     pub color_blend: Option<BlendState>,
+    pub stencil_test: Option<StencilState>,
     pub color_write: ColorMask,
 }
 
@@ -992,6 +1200,7 @@ impl Default for PipelineParams {
             depth_write: false,             // no depth write,
             depth_write_offset: None,
             color_blend: None,
+            stencil_test: None,
             color_write: (true, true, true, true),
         }
     }
