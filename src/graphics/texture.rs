@@ -40,14 +40,20 @@ pub enum TextureFormat {
     RGB8,
     RGBA8,
     Depth,
+    Alpha,
 }
 
+/// Converts from TextureFormat to (internal_format, format, pixel_type)
 impl From<TextureFormat> for (GLenum, GLenum, GLenum) {
     fn from(format: TextureFormat) -> Self {
         match format {
             TextureFormat::RGB8 => (GL_RGB, GL_RGB, GL_UNSIGNED_BYTE),
             TextureFormat::RGBA8 => (GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE),
             TextureFormat::Depth => (GL_DEPTH_COMPONENT, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT),
+            #[cfg(target_arch = "wasm32")]
+            TextureFormat::Alpha => (GL_ALPHA, GL_ALPHA, GL_UNSIGNED_BYTE),
+            #[cfg(not(target_arch = "wasm32"))]
+            TextureFormat::Alpha => (GL_R8, GL_RED, GL_UNSIGNED_BYTE), // texture updates will swizzle Red -> Alpha to match WASM
         }
     }
 }
@@ -56,11 +62,11 @@ impl TextureFormat {
     /// Returns the size in bytes of texture with `dimensions`.
     pub fn size(self, width: u32, height: u32) -> u32 {
         let square = width * height;
-
         match self {
             TextureFormat::RGB8 => 3 * square,
             TextureFormat::RGBA8 => 4 * square,
             TextureFormat::Depth => 2 * square,
+            TextureFormat::Alpha => 1 * square,
         }
     }
 }
@@ -97,7 +103,6 @@ pub enum FilterMode {
     Nearest = GL_NEAREST as isize,
 }
 
-
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum TextureAccess {
     /// Used as read-only from GPU
@@ -121,11 +126,16 @@ impl Texture {
         Self::new(ctx, TextureAccess::RenderTarget, None, params)
     }
 
-    pub fn new(ctx: &mut Context, _access: TextureAccess, bytes: Option<&[u8]>, params: TextureParams) -> Texture {
+    pub fn new(
+        ctx: &mut Context,
+        _access: TextureAccess,
+        bytes: Option<&[u8]>,
+        params: TextureParams,
+    ) -> Texture {
         if let Some(bytes_data) = bytes {
             assert_eq!(
-                params.format.size(params.width, params.height),
-                bytes_data.len() as u32
+                params.format.size(params.width, params.height) as usize,
+                bytes_data.len()
             );
         }
 
@@ -138,6 +148,20 @@ impl Texture {
         unsafe {
             glGenTextures(1, &mut texture as *mut _);
             ctx.cache.bind_texture(0, texture);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // miniquad always uses row alignment of 1
+
+            if cfg!(not(target_arch = "wasm32")) {
+                // if not WASM
+                if params.format == TextureFormat::Alpha {
+                    // if alpha miniquad texture, the value on non-WASM is stored in red channel
+                    // swizzle red -> alpha
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_RED as _);
+                } else {
+                    // keep alpha -> alpha
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ALPHA as _);
+                }
+            }
+
             glTexImage2D(
                 GL_TEXTURE_2D,
                 0,
@@ -200,10 +224,39 @@ impl Texture {
         ctx.cache.restore_texture_binding(0);
     }
 
+    pub fn resize(&mut self, ctx: &mut Context, width: u32, height: u32, bytes: Option<&[u8]>) {
+        ctx.cache.store_texture_binding(0);
+
+        let (internal_format, format, pixel_type) = self.format.into();
+
+        self.width = width;
+        self.height = height;
+
+        unsafe {
+            glTexImage2D(
+                GL_TEXTURE_2D,
+                0,
+                internal_format as i32,
+                self.width as i32,
+                self.height as i32,
+                0,
+                format,
+                pixel_type,
+                match bytes {
+                    Some(bytes) => bytes.as_ptr() as *const _,
+                    Option::None => std::ptr::null(),
+                },
+            );
+        }
+
+        ctx.cache.restore_texture_binding(0);
+
+    }
+
     /// Update whole texture content
     /// bytes should be width * height * 4 size - non rgba8 textures are not supported yet anyway
     pub fn update(&self, ctx: &mut Context, bytes: &[u8]) {
-        assert_eq!(self.width as usize * self.height as usize * 4, bytes.len());
+        assert_eq!(self.size(self.width, self.height), bytes.len());
 
         self.update_texture_part(
             ctx,
@@ -224,7 +277,7 @@ impl Texture {
         height: i32,
         bytes: &[u8],
     ) {
-        assert_eq!(width as usize * height as usize * 4, bytes.len());
+        assert_eq!(self.size(width as _, height as _), bytes.len());
         assert!(x_offset + width <= self.width as _);
         assert!(y_offset + height <= self.height as _);
 
@@ -234,6 +287,20 @@ impl Texture {
         let (_, format, pixel_type) = self.format.into();
 
         unsafe {
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // miniquad always uses row alignment of 1
+
+            if cfg!(not(target_arch = "wasm32")) {
+                // if not WASM
+                if self.format == TextureFormat::Alpha {
+                    // if alpha miniquad texture, the value on non-WASM is stored in red channel
+                    // swizzle red -> alpha
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_RED as _);
+                } else {
+                    // keep alpha -> alpha
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ALPHA as _);
+                }
+            }
+
             glTexSubImage2D(
                 GL_TEXTURE_2D,
                 0,
@@ -248,5 +315,10 @@ impl Texture {
         }
 
         ctx.cache.restore_texture_binding(0);
+    }
+
+    #[inline]
+    fn size(&self, width: u32, height: u32) -> usize {
+        self.format.size(width, height) as usize
     }
 }

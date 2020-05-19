@@ -3181,6 +3181,11 @@ static PFN_glLinkProgram _sapp_glLinkProgram;
 void glLinkProgram(GLuint program) {
     _sapp_glLinkProgram(program);
 }
+typedef void  (GL_APIENTRY *PFN_glPixelStorei)(GLenum pname, GLint param);
+static PFN_glPixelStorei _sapp_glPixelStorei;
+void glPixelStorei(GLenum pname, GLint param) {
+    _sapp_glPixelStorei(pname, param);
+}
 typedef GLint (GL_APIENTRY *PFN_glGetUniformLocation)(GLuint program, const GLchar * name);
 static PFN_glGetUniformLocation _sapp_glGetUniformLocation;
 GLint glGetUniformLocation(GLuint program, const GLchar * name) {
@@ -3282,6 +3287,10 @@ void glDrawElements(GLenum mode, GLsizei count, GLenum type, const void * indice
     _sapp_glDrawElements(mode, count, type, indices);
 }
 typedef void  (GL_APIENTRY *PFN_glDeleteFramebuffers)(GLsizei n, const GLuint * framebuffers);
+static PFN_glDeleteFramebuffers _sapp_glDeleteFramebuffers;
+void glDeleteFramebuffers(GLsizei n, const GLuint * buffers) {
+    _sapp_glDeleteFramebuffers(n, buffers);
+}
 static PFN_glDeleteFramebuffers _sapp_glDeleteFramebuffers;
 typedef void  (GL_APIENTRY *PFN_glBlendEquationSeparate)(GLenum modeRGB, GLenum modeAlpha);
 static PFN_glBlendEquationSeparate _sapp_glBlendEquationSeparate;
@@ -3572,6 +3581,7 @@ _SOKOL_PRIVATE  void _sapp_win32_gl_loadfuncs(void) {
     _SAPP_GLPROC(glUseProgram);
     _SAPP_GLPROC(glShaderSource);
     _SAPP_GLPROC(glLinkProgram);
+    _SAPP_GLPROC(glPixelStorei);
     _SAPP_GLPROC(glGetUniformLocation);
     _SAPP_GLPROC(glGetShaderiv);
     _SAPP_GLPROC(glGetProgramInfoLog);
@@ -3674,6 +3684,7 @@ _SOKOL_PRIVATE  void _sapp_win32_gl_loadfuncs(void) {
 #define glUseProgram _sapp_glUseProgram
 #define glShaderSource _sapp_glShaderSource
 #define glLinkProgram _sapp_glLinkProgram
+#define glPixelStorei _sapp_glPixelStorei
 #define glGetUniformLocation _sapp_glGetUniformLocation
 #define glGetShaderiv _sapp_glGetShaderiv
 #define glGetProgramInfoLog _sapp_glGetProgramInfoLog

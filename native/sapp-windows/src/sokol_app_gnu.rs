@@ -8188,6 +8188,12 @@ pub const GL_FRAGMENT_SHADER: u32 = 35632;
 pub const GL_FLOAT: u32 = 5126;
 pub const GL_TEXTURE_MAX_LOD: u32 = 33083;
 pub const GL_DEPTH_COMPONENT: u32 = 6402;
+pub const GL_ALPHA: u32 = 6406;
+pub const GL_TEXTURE_SWIZZLE_R: u32 = 36418;
+pub const GL_TEXTURE_SWIZZLE_G: u32 = 36419;
+pub const GL_TEXTURE_SWIZZLE_B: u32 = 36420;
+pub const GL_TEXTURE_SWIZZLE_A: u32 = 36421;
+pub const GL_TEXTURE_SWIZZLE_RGBA: u32 = 36422;
 pub const GL_ONE_MINUS_DST_ALPHA: u32 = 773;
 pub const GL_COLOR: u32 = 6144;
 pub const GL_TEXTURE_2D_ARRAY: u32 = 35866;
@@ -8262,6 +8268,7 @@ pub const GL_TRUE: u32 = 1;
 pub const GL_NEVER: u32 = 512;
 pub const GL_POINTS: u32 = 0;
 pub const GL_ONE_MINUS_SRC_COLOR: u32 = 769;
+pub const GL_UNPACK_ALIGNMENT: u32 = 3317;
 pub const GL_MIRRORED_REPEAT: u32 = 33648;
 pub const GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS: u32 = 35661;
 pub const GL_R11F_G11F_B10F: u32 = 35898;
@@ -41986,6 +41993,13 @@ extern "C" {
 extern "C" {
     pub fn glLinkProgram(program: GLuint);
 }
+pub type PFN_glPixelStorei = ::std::option::Option<unsafe extern "C" fn(pname: GLenum, param: GLint)>;
+extern "C" {
+    pub static mut _sapp_glPixelStorei: PFN_glPixelStorei;
+}
+extern "C" {
+    pub fn glPixelStorei(pname: GLenum, param: GLint);
+}
 pub type PFN_glGetUniformLocation =
     ::std::option::Option<unsafe extern "C" fn(program: GLuint, name: *const GLchar) -> GLint>;
 extern "C" {
@@ -42258,6 +42272,12 @@ pub type PFN_glDeleteFramebuffers =
     ::std::option::Option<unsafe extern "C" fn(n: GLsizei, framebuffers: *const GLuint)>;
 extern "C" {
     pub static mut _sapp_glDeleteFramebuffers: PFN_glDeleteFramebuffers;
+}
+extern "C" {
+    pub fn glDeleteFramebuffers(
+        n: GLsizei,
+        buffers: *const GLuint,
+    );
 }
 pub type PFN_glBlendEquationSeparate =
     ::std::option::Option<unsafe extern "C" fn(modeRGB: GLenum, modeAlpha: GLenum)>;

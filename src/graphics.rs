@@ -235,6 +235,7 @@ pub struct PipelineLayout {
     pub attributes: &'static [VertexAttribute],
 }
 
+#[derive(Clone, Debug, Copy)]
 pub struct Shader(usize);
 
 impl Shader {
@@ -269,14 +270,37 @@ struct ShaderInternal {
     uniforms: Vec<ShaderUniform>,
 }
 
+/// Pixel arithmetic description for blending operations.
+/// Will be used in an equation:
+/// `equation(sfactor * source_color, dfactor * destination_color)`
+/// Where source_color is the new pixel color and destination color is color from the destination buffer.
+///
+/// Example:
+///```
+///# use miniquad::{BlendState, BlendFactor, BlendValue, Equation};
+///BlendState::new(
+///    Equation::Add,
+///    BlendFactor::Value(BlendValue::SourceAlpha),
+///    BlendFactor::OneMinusValue(BlendValue::SourceAlpha)
+///);
+///```
+/// This will be `source_color * source_color.a + destination_color * (1 - source_color.a)`
+/// Wich is quite common set up for alpha blending.
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct BlendState {
-    pub eq_rgb: Equation,
-    pub eq_alpha: Equation,
-    pub src_rgb: BlendFactor,
-    pub dst_rgb: BlendFactor,
-    pub src_alpha: BlendFactor,
-    pub dst_alpha: BlendFactor,
+    equation: Equation,
+    sfactor: BlendFactor,
+    dfactor: BlendFactor,
+}
+
+impl BlendState {
+    pub fn new(equation: Equation, sfactor: BlendFactor, dfactor: BlendFactor) -> BlendState {
+        BlendState {
+            equation,
+            sfactor,
+            dfactor,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -356,7 +380,8 @@ struct GlCache {
     vertex_buffer: GLuint,
     textures: [GLuint; MAX_SHADERSTAGE_IMAGES],
     cur_pipeline: Option<Pipeline>,
-    blend: Option<BlendState>,
+    color_blend: Option<BlendState>,
+    alpha_blend: Option<BlendState>,
     stencil: Option<StencilState>,
     color_write: ColorMask,
     cull_face: CullFace,
@@ -469,6 +494,7 @@ pub struct RenderPass(usize);
 struct RenderPassInternal {
     gl_fb: GLuint,
     texture: Texture,
+    depth_texture: Option<Texture>,
 }
 
 impl RenderPass {
@@ -478,6 +504,8 @@ impl RenderPass {
         depth_img: impl Into<Option<Texture>>,
     ) -> RenderPass {
         let mut gl_fb = 0;
+
+        let depth_img = depth_img.into();
 
         unsafe {
             glGenFramebuffers(1, &mut gl_fb as *mut _);
@@ -489,7 +517,7 @@ impl RenderPass {
                 color_img.texture,
                 0,
             );
-            if let Some(depth_img) = depth_img.into() {
+            if let Some(depth_img) = depth_img {
                 glFramebufferTexture2D(
                     GL_FRAMEBUFFER,
                     GL_DEPTH_ATTACHMENT,
@@ -503,11 +531,25 @@ impl RenderPass {
         let pass = RenderPassInternal {
             gl_fb,
             texture: color_img,
+            depth_texture: depth_img
         };
 
         context.passes.push(pass);
 
         RenderPass(context.passes.len() - 1)
+    }
+
+    pub fn delete(&self, ctx: &mut Context) {
+        let render_pass = &mut ctx.passes[self.0];
+
+        unsafe {
+            glDeleteFramebuffers(1, &mut render_pass.gl_fb as *mut _)
+        }
+
+        render_pass.texture.delete();
+        if let Some(depth_texture) = render_pass.depth_texture {
+            depth_texture.delete();
+        }
     }
 }
 
@@ -545,7 +587,8 @@ impl Context {
                     index_buffer: 0,
                     vertex_buffer: 0,
                     cur_pipeline: None,
-                    blend: None,
+                    color_blend: None,
+                    alpha_blend: None,
                     stencil: None,
                     color_write: (true, true, true, true),
                     cull_face: CullFace::Nothing,
@@ -553,7 +596,6 @@ impl Context {
                     textures: [0; MAX_SHADERSTAGE_IMAGES],
                     attributes: [None; MAX_VERTEX_ATTRIBUTES],
                 },
-                //attributes: [None; 16],
             }
         }
     }
@@ -612,7 +654,11 @@ impl Context {
         }
 
         self.set_cull_face(self.pipelines[pipeline.0].params.cull_face);
-        self.set_blend(self.pipelines[pipeline.0].params.color_blend);
+        self.set_blend(
+            self.pipelines[pipeline.0].params.color_blend,
+            self.pipelines[pipeline.0].params.alpha_blend,
+        );
+
         self.set_stencil(self.pipelines[pipeline.0].params.stencil_test);
         self.set_color_write(self.pipelines[pipeline.0].params.color_write);
     }
@@ -647,29 +693,49 @@ impl Context {
         self.cache.color_write = color_write;
     }
 
-    pub fn set_blend(&mut self, color_blend: Option<BlendState>) {
-        if self.cache.blend == color_blend {
+    pub fn set_blend(&mut self, color_blend: Option<BlendState>, alpha_blend: Option<BlendState>) {
+        if color_blend.is_none() && alpha_blend.is_some() {
+            panic!("AlphaBlend without ColorBlend");
+        }
+        if self.cache.color_blend == color_blend && self.cache.alpha_blend == alpha_blend {
             return;
         }
         unsafe {
             if let Some(blend) = color_blend {
-                if self.cache.blend.is_none() {
+                if self.cache.color_blend.is_none() {
                     glEnable(GL_BLEND);
                 }
 
-                glBlendFuncSeparate(
-                    blend.src_rgb.into(),
-                    blend.dst_rgb.into(),
-                    blend.src_alpha.into(),
-                    blend.dst_alpha.into(),
-                );
-                glBlendEquationSeparate(blend.eq_rgb.into(), blend.eq_alpha.into());
-            } else if self.cache.blend.is_some() {
+                let BlendState {
+                    equation: eq_rgb,
+                    sfactor: src_rgb,
+                    dfactor: dst_rgb,
+                } = blend;
+
+                if let Some(BlendState {
+                    equation: eq_alpha,
+                    sfactor: src_alpha,
+                    dfactor: dst_alpha,
+                }) = alpha_blend
+                {
+                    glBlendFuncSeparate(
+                        src_rgb.into(),
+                        dst_rgb.into(),
+                        src_alpha.into(),
+                        dst_alpha.into(),
+                    );
+                    glBlendEquationSeparate(eq_rgb.into(), eq_alpha.into());
+                } else {
+                    glBlendFunc(src_rgb.into(), dst_rgb.into());
+                    glBlendEquationSeparate(eq_rgb.into(), eq_rgb.into());
+                }
+            } else if self.cache.alpha_blend.is_some() {
                 glDisable(GL_BLEND);
             }
         }
 
-        self.cache.blend = color_blend;
+        self.cache.color_blend = color_blend;
+        self.cache.alpha_blend = alpha_blend;
     }
 
     pub fn set_stencil(&mut self, stencil_test: Option<StencilState>) {
@@ -711,7 +777,7 @@ impl Context {
                     back.test_mask,
                 );
                 glStencilMaskSeparate(GL_BACK, back.write_mask);
-            } else if self.cache.blend.is_some() {
+            } else if self.cache.stencil.is_some() {
                 glDisable(GL_STENCIL_TEST);
             }
         }
@@ -928,9 +994,17 @@ impl Context {
     }
 
     pub fn draw(&self, base_element: i32, num_elements: i32, num_instances: i32) {
+        assert!(
+            self.cache.cur_pipeline.is_some(),
+            "Drawing without any binded pipeline"
+        );
+
+        let pip = &self.pipelines[self.cache.cur_pipeline.unwrap().0];
+        let primitive_type = pip.params.primitive_type.into();
+
         unsafe {
             glDrawElementsInstanced(
-                GL_TRIANGLES,
+                primitive_type,
                 num_elements,
                 GL_UNSIGNED_SHORT,
                 (2 * base_element) as *mut _,
@@ -1176,15 +1250,66 @@ impl From<CompareFunc> for GLenum {
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
+pub enum PrimitiveType {
+    Triangles,
+    Lines,
+}
+
+impl From<PrimitiveType> for GLenum {
+    fn from(primitive_type: PrimitiveType) -> Self {
+        match primitive_type {
+            PrimitiveType::Triangles => GL_TRIANGLES,
+            PrimitiveType::Lines => GL_LINES,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct PipelineParams {
     pub cull_face: CullFace,
     pub front_face_order: FrontFaceOrder,
     pub depth_test: Comparison,
     pub depth_write: bool,
     pub depth_write_offset: Option<(f32, f32)>,
+    /// Color (RGB) blend function. If None - blending will be disabled for this pipeline.
+    /// Usual use case to get alpha-blending:
+    ///```
+    ///# use miniquad::{PipelineParams, BlendState, BlendValue, BlendFactor, Equation};
+    ///PipelineParams {
+    ///    color_blend: Some(BlendState::new(
+    ///        Equation::Add,
+    ///        BlendFactor::Value(BlendValue::SourceAlpha),
+    ///        BlendFactor::OneMinusValue(BlendValue::SourceAlpha))
+    ///    ),
+    ///    ..Default::default()
+    ///};
+    ///```
     pub color_blend: Option<BlendState>,
+    /// Alpha blend function. If None - alpha will be blended with same equation than RGB colors.
+    /// One of possible separate alpha channel blend settings is to avoid blending with WebGl background.
+    /// On webgl canvas's resulting alpha channel will be used to blend the whole canvas background.
+    /// To avoid modifying only alpha channel, but keep usual transparency:
+    ///```
+    ///# use miniquad::{PipelineParams, BlendState, BlendValue, BlendFactor, Equation};
+    ///PipelineParams {
+    ///    color_blend: Some(BlendState::new(
+    ///        Equation::Add,
+    ///        BlendFactor::Value(BlendValue::SourceAlpha),
+    ///        BlendFactor::OneMinusValue(BlendValue::SourceAlpha))
+    ///    ),
+    ///    alpha_blend: Some(BlendState::new(
+    ///        Equation::Add,
+    ///        BlendFactor::Zero,
+    ///        BlendFactor::One)
+    ///    ),
+    ///    ..Default::default()
+    ///};
+    ///```
+    /// The same results may be achieved with ColorMask(true, true, true, false)
+    pub alpha_blend: Option<BlendState>,
     pub stencil_test: Option<StencilState>,
     pub color_write: ColorMask,
+    pub primitive_type: PrimitiveType,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -1199,8 +1324,10 @@ impl Default for PipelineParams {
             depth_write: false,             // no depth write,
             depth_write_offset: None,
             color_blend: None,
+            alpha_blend: None,
             stencil_test: None,
             color_write: (true, true, true, true),
+            primitive_type: PrimitiveType::Triangles,
         }
     }
 }
