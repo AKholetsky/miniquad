@@ -76,6 +76,8 @@ And then use the following .html to load .wasm:
 <details><summary>index.html</summary>
 
 ```html
+<html lang="en">
+
 <head>
     <meta charset="utf-8">
     <title>TITLE</title>
@@ -158,3 +160,13 @@ cargo run --example quad --target x86_64-pc-windows-gnu
 * High end API, like Vulkan/DirectX 12. Take a look on [gfx-rs](https://github.com/gfx-rs/gfx) or [vulkano](https://github.com/vulkano-rs/vulkano) instead!
 
 * sokol-gfx api compatibility. While sokol is absolutely great as an API design foundation, just reimplementing sokol in rust is not a goal. The idea is to learn from sokol, but make a library in a rust way when it is possible.
+
+# Platinum sponsors
+
+Miniquad is supported by:
+
+<p>
+  <a href="https://embark-studios.com">
+    <img src="https://www.embark.dev/img/logo_black.png" width="201px">
+  </a>
+</p>
