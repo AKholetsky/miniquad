@@ -3362,26 +3362,6 @@ static PFN_glUniform1i _sapp_glUniform1i;
 void  glUniform1i(GLint location, GLint v0) {
     _sapp_glUniform1i(location, v0);
 }
-typedef void  (GL_APIENTRY *PFN_glUniform1iv)(GLint location, GLsizei count, const GLint * value);
-static PFN_glUniform1iv _sapp_glUniform1iv;
-void  glUniform1iv(GLint location, GLsizei count, const GLint * value) {
-    _sapp_glUniform1iv(location, count, value);
-}
-typedef void  (GL_APIENTRY *PFN_glUniform2iv)(GLint location, GLsizei count, const GLint * value);
-static PFN_glUniform2iv _sapp_glUniform2iv;
-void  glUniform2iv(GLint location, GLsizei count, const GLint * value) {
-    _sapp_glUniform2iv(location, count, value);
-}
-typedef void  (GL_APIENTRY *PFN_glUniform3iv)(GLint location, GLsizei count, const GLint * value);
-static PFN_glUniform3iv _sapp_glUniform3iv;
-void  glUniform3iv(GLint location, GLsizei count, const GLint * value) {
-    _sapp_glUniform3iv(location, count, value);
-}
-typedef void  (GL_APIENTRY *PFN_glUniform4iv)(GLint location, GLsizei count, const GLint * value);
-static PFN_glUniform4iv _sapp_glUniform4iv;
-void  glUniform4iv(GLint location, GLsizei count, const GLint * value) {
-    _sapp_glUniform4iv(location, count, value);
-}
 typedef void  (GL_APIENTRY *PFN_glDisable)(GLenum cap);
 static PFN_glDisable _sapp_glDisable;
 void glDisable(GLenum cap) {
@@ -3389,9 +3369,6 @@ void glDisable(GLenum cap) {
 }
 typedef void  (GL_APIENTRY *PFN_glColorMask)(GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha);
 static PFN_glColorMask _sapp_glColorMask;
-void glColorMask(GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha) {
-    _sapp_glColorMask(red, green, blue, alpha);
-}
 typedef void  (GL_APIENTRY *PFN_glBindBuffer)(GLenum target, GLuint buffer);
 static PFN_glBindBuffer _sapp_glBindBuffer;
 void glBindBuffer(GLenum target, GLuint buffer) {
@@ -3599,10 +3576,6 @@ _SOKOL_PRIVATE  void _sapp_win32_gl_loadfuncs(void) {
     _SAPP_GLPROC(glDrawElementsInstanced);
     _SAPP_GLPROC(glVertexAttribPointer);
     _SAPP_GLPROC(glUniform1i);
-    _SAPP_GLPROC(glUniform1iv);
-    _SAPP_GLPROC(glUniform2iv);
-    _SAPP_GLPROC(glUniform3iv);
-    _SAPP_GLPROC(glUniform4iv);
     _SAPP_GLPROC(glDisable);
     _SAPP_GLPROC(glColorMask);
     _SAPP_GLPROC(glBindBuffer);

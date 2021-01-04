@@ -50,7 +50,7 @@ impl Stage {
             images: vec![],
         };
 
-        let shader = Shader::new(ctx, shader::VERTEX, shader::FRAGMENT, shader::META);
+        let shader = Shader::new(ctx, shader::VERTEX, shader::FRAGMENT, shader::meta()).unwrap();
 
         let pipeline = Pipeline::new(
             ctx,
@@ -88,9 +88,9 @@ impl EventHandler for Stage {
             if self.pos.len() < MAX_PARTICLES {
                 self.pos.push(vec3(0., 0., 0.));
                 self.vel.push(vec3(
-                    ((unsafe { rand() } & 0x7FFF) as f32 / 0x7FFF as f32) - 0.5,
-                    ((unsafe { rand() } & 0x7FFF) as f32 / 0x7FFF as f32) * 0.5 + 2.0,
-                    ((unsafe { rand() } & 0x7FFF) as f32 / 0x7FFF as f32) - 0.5,
+                    quad_rand::gen_range(-1., 1.),
+                    quad_rand::gen_range(0., 2.),
+                    quad_rand::gen_range(-1., 1.),
                 ));
             } else {
                 break;
@@ -173,12 +173,14 @@ mod shader {
     }
     "#;
 
-    pub const META: ShaderMeta = ShaderMeta {
-        images: &[],
-        uniforms: UniformBlockLayout {
-            uniforms: &[("mvp", UniformType::Mat4)],
-        },
-    };
+    pub fn meta() -> ShaderMeta {
+        ShaderMeta {
+            images: vec![],
+            uniforms: UniformBlockLayout {
+                uniforms: vec![UniformDesc::new("mvp", UniformType::Mat4)],
+            },
+        }
+    }
 
     #[repr(C)]
     pub struct Uniforms {

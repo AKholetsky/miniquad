@@ -1,7 +1,7 @@
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
 
 pub mod fs;
-mod gl;
+pub mod gl;
 mod rand;
 
 pub use gl::*;
@@ -9,12 +9,16 @@ pub use rand::*;
 
 struct SappContext {
     desc: sapp_desc,
+    clipboard: Option<String>,
 }
 
 impl SappContext {
     unsafe fn init(desc: sapp_desc) {
         let user_data = desc.user_data;
-        SAPP_CONTEXT = Some(SappContext { desc });
+        SAPP_CONTEXT = Some(SappContext {
+            desc,
+            clipboard: None,
+        });
         SAPP_CONTEXT
             .as_mut()
             .unwrap()
@@ -304,7 +308,6 @@ pub unsafe fn sapp_height() -> ::std::os::raw::c_int {
     canvas_height()
 }
 
-#[no_mangle]
 extern "C" {
     pub fn init_opengl();
     pub fn canvas_width() -> i32;
@@ -315,12 +318,16 @@ extern "C" {
     pub fn console_warn(msg: *const ::std::os::raw::c_char);
     pub fn console_error(msg: *const ::std::os::raw::c_char);
 
+    pub fn sapp_set_clipboard(clipboard: *const i8, len: usize);
+
     /// call "requestPointerLock" and "exitPointerLock" internally.
     /// Will hide cursor and will disable mouse_move events, but instead will
     /// will make inifinite mouse field for raw_device_input event.
     /// Notice that this function will works only from "engaging" event callbacks - from
     /// "mouse_down"/"key_down" event handler functions.
     pub fn sapp_set_cursor_grab(grab: bool);
+
+    pub fn sapp_is_elapsed_timer_supported() -> bool;
 }
 
 /// Do nothing on wasm - cursor will be hidden by "sapp_set_cursor_grab" anyway.
@@ -332,6 +339,40 @@ pub unsafe fn sapp_high_dpi() -> bool {
 
 pub unsafe fn sapp_dpi_scale() -> f32 {
     1.
+}
+
+#[no_mangle]
+pub extern "C" fn crate_version() -> u32 {
+    let major = env!("CARGO_PKG_VERSION_MAJOR").parse::<u32>().unwrap();
+    let minor = env!("CARGO_PKG_VERSION_MINOR").parse::<u32>().unwrap();
+    let patch = env!("CARGO_PKG_VERSION_PATCH").parse::<u32>().unwrap();
+
+    (major << 24) + (minor << 16) + patch
+}
+
+#[no_mangle]
+pub extern "C" fn allocate_vec_u8(len: usize) -> *mut u8 {
+    let mut string = vec![0u8; len];
+    let ptr = string.as_mut_ptr();
+    std::mem::forget(string);
+    ptr
+}
+
+#[no_mangle]
+pub extern "C" fn on_clipboard_paste(msg: *mut u8, len: usize) {
+    let msg = unsafe { String::from_raw_parts(msg, len, len) };
+
+    unsafe { sapp_context().clipboard = Some(msg) };
+}
+
+pub fn clipboard_get() -> Option<String> {
+    unsafe { sapp_context().clipboard.clone() }
+}
+
+pub fn clipboard_set(data: &str) {
+    let len = data.len();
+    let data = std::ffi::CString::new(data).unwrap();
+    unsafe { sapp_set_clipboard(data.as_ptr(), len) };
 }
 
 #[no_mangle]
@@ -404,11 +445,13 @@ pub extern "C" fn mouse_wheel(delta_x: i32, delta_y: i32) {
 }
 
 #[no_mangle]
-pub extern "C" fn key_down(key: u32) {
+pub extern "C" fn key_down(key: u32, modifiers: u32, repeat: bool) {
     let mut event: sapp_event = unsafe { std::mem::zeroed() };
 
     event.type_ = sapp_event_type_SAPP_EVENTTYPE_KEY_DOWN;
     event.key_code = key;
+    event.modifiers = modifiers;
+    event.key_repeat = repeat;
     unsafe {
         sapp_context().event(event);
     }

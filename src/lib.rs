@@ -1,21 +1,27 @@
+#[cfg(target_os = "android")]
+extern crate sapp_android as sapp;
 #[cfg(target_os = "macos")]
 extern crate sapp_darwin as sapp;
 #[cfg(not(any(
     target_os = "linux",
     target_os = "macos",
+    target_os = "ios",
     target_os = "android",
     target_arch = "wasm32",
     windows
 )))]
 extern crate sapp_dummy as sapp;
-#[cfg(target_os = "linux")]
+#[cfg(target_os = "ios")]
+extern crate sapp_ios as sapp;
+#[cfg(all(target_os = "linux", feature = "kms"))]
+extern crate sapp_kms as sapp;
+#[cfg(all(target_os = "linux", not(feature = "kms")))]
 extern crate sapp_linux as sapp;
+
 #[cfg(target_arch = "wasm32")]
 extern crate sapp_wasm as sapp;
 #[cfg(windows)]
 extern crate sapp_windows as sapp;
-#[cfg(target_os = "android")]
-extern crate sapp_android as sapp;
 
 pub mod clipboard;
 pub mod conf;
@@ -30,9 +36,22 @@ pub use event::*;
 
 pub use graphics::*;
 
+pub use sapp::gl;
+
 use std::ffi::CString;
 
-pub use sapp::{rand, RAND_MAX};
+#[deprecated(
+    since = "0.3",
+    note = "libc rand is slow and incosistent across platforms. Please use quad-rnd crate instead."
+)]
+pub unsafe fn rand() -> i32 {
+    sapp::rand()
+}
+#[deprecated(
+    since = "0.3",
+    note = "libc rand is slow and incosistent across platforms. Please use quad-rnd crate instead."
+)]
+pub const RAND_MAX: u32 = sapp::RAND_MAX;
 
 pub mod date {
     #[cfg(not(target_arch = "wasm32"))]
@@ -47,7 +66,7 @@ pub mod date {
 
     #[cfg(target_arch = "wasm32")]
     pub fn now() -> f64 {
-        unsafe { sapp::time() }
+        unsafe { sapp::now() }
     }
 }
 
@@ -97,6 +116,7 @@ impl Context {
     ///         so set_cursor_grab(false) on window's focus lost is recommended.
     /// TODO: implement window focus events
     pub fn set_cursor_grab(&self, grab: bool) {
+        #[cfg(not(target_os = "ios"))]
         unsafe {
             sapp::sapp_set_cursor_grab(grab);
         }
@@ -158,7 +178,7 @@ extern "C" fn init(user_data: *mut ::std::os::raw::c_void) {
     let context = graphics::Context::new();
 
     let user_data = f(context);
-    std::mem::replace(data, UserDataState::Intialized(user_data));
+    *data = UserDataState::Intialized(user_data);
 }
 
 extern "C" fn frame(user_data: *mut ::std::os::raw::c_void) {
@@ -220,7 +240,7 @@ extern "C" fn event(event: *const sapp::sapp_event, user_data: *mut ::std::os::r
             let keycode = KeyCode::from(event.key_code);
             let key_mods = KeyMods::from(event.modifiers);
 
-            event_call!(data, key_down_event, keycode, key_mods, false)
+            event_call!(data, key_down_event, keycode, key_mods, event.key_repeat)
         }
         sapp::sapp_event_type_SAPP_EVENTTYPE_KEY_UP => {
             let keycode = KeyCode::from(event.key_code);
@@ -256,6 +276,7 @@ extern "C" fn event(event: *const sapp::sapp_event, user_data: *mut ::std::os::r
         sapp::sapp_event_type_SAPP_EVENTTYPE_QUIT_REQUESTED => {
             event_call!(data, quit_requested_event);
         }
+        #[cfg(not(target_os = "ios"))]
         sapp::sapp_event_type_SAPP_EVENTTYPE_RAW_DEVICE => {
             event_call!(data, raw_mouse_motion, event.mouse_dx, event.mouse_dy);
         }
@@ -306,6 +327,7 @@ where
 
     let mut user_data = Box::new(UserDataState::Uninitialized(Box::new(f)));
 
+    desc.sample_count = conf.sample_count;
     desc.width = conf.window_width;
     desc.height = conf.window_height;
     desc.fullscreen = conf.fullscreen as _;
