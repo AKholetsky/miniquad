@@ -1,7 +1,7 @@
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
 
-pub mod gl;
 pub mod clipboard;
+pub mod gl;
 mod rand;
 
 pub use gl::*;
@@ -9,9 +9,10 @@ pub use rand::*;
 
 use winapi::{
     shared::{
+        hidusage::{HID_USAGE_GENERIC_MOUSE, HID_USAGE_GENERIC_POINTER},
         minwindef::{DWORD, HINSTANCE, HIWORD, INT, LOWORD, LPARAM, LRESULT, PROC, UINT, WPARAM},
         ntdef::{HRESULT, LPCSTR, NULL},
-        windef::{HDC, HGLRC, HMONITOR, HWND, POINT, RECT},
+        windef::{HCURSOR, HDC, HGLRC, HMONITOR, HWND, POINT, RECT},
         windowsx::{GET_X_LPARAM, GET_Y_LPARAM},
     },
     um::{
@@ -26,21 +27,25 @@ use winapi::{
             PFD_DRAW_TO_WINDOW, PFD_SUPPORT_OPENGL, PFD_TYPE_RGBA, PIXELFORMATDESCRIPTOR,
         },
         winuser::{
-            AdjustWindowRectEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-            GetClientRect, GetCursorInfo, GetDC, GetKeyState, GetSystemMetrics, LoadCursorW,
-            LoadIconW, MonitorFromPoint, PeekMessageW, PostMessageW, PostQuitMessage,
-            RegisterClassW, ShowCursor, ShowWindow, TrackMouseEvent, TranslateMessage,
-            UnregisterClassW, CS_HREDRAW, CS_OWNDC, CS_VREDRAW, CURSORINFO, CURSOR_SHOWING,
-            CW_USEDEFAULT, HTCLIENT, IDC_ARROW, IDI_WINLOGO, MONITOR_DEFAULTTONEAREST, MSG,
-            PM_REMOVE, SC_KEYMENU, SC_MONITORPOWER, SC_SCREENSAVE, SIZE_MINIMIZED, SM_CXSCREEN,
-            SM_CYSCREEN, SW_HIDE, SW_SHOW, TME_LEAVE, TRACKMOUSEEVENT, VK_CONTROL, VK_LWIN,
-            VK_MENU, VK_RWIN, VK_SHIFT, WM_CHAR, WM_CLOSE, WM_ERASEBKGND, WM_KEYDOWN, WM_KEYUP,
-            WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL,
-            WM_MOUSELEAVE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP,
+            AdjustWindowRectEx, ClientToScreen, ClipCursor, CreateWindowExW, DefWindowProcW,
+            DestroyWindow, DispatchMessageW, GetClientRect, GetCursorInfo, GetDC, GetKeyState,
+            GetRawInputData, GetSystemMetrics, LoadCursorW, LoadIconW, MonitorFromPoint,
+            PeekMessageW, PostMessageW, PostQuitMessage, RegisterClassW, RegisterRawInputDevices,
+            SetRect, ShowCursor, ShowWindow, TrackMouseEvent, TranslateMessage, UnregisterClassW,
+            CS_HREDRAW, CS_OWNDC, CS_VREDRAW, CURSORINFO, CURSOR_SHOWING, CW_USEDEFAULT, HTCLIENT,
+            IDC_ARROW, IDI_WINLOGO, MONITOR_DEFAULTTONEAREST, MOUSE_MOVE_ABSOLUTE, MSG, PM_REMOVE,
+            RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RIDEV_REMOVE, RID_INPUT, SC_KEYMENU,
+            SC_MONITORPOWER, SC_SCREENSAVE, SIZE_MINIMIZED, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE,
+            SW_SHOW, TME_LEAVE, TRACKMOUSEEVENT, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+            WM_CHAR, WM_CLOSE, WM_ERASEBKGND, WM_INPUT, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN,
+            WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSELEAVE,
+            WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP,
             WM_SETCURSOR, WM_SIZE, WM_SYSCOMMAND, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDCLASSW,
             WS_CAPTION, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_OVERLAPPEDWINDOW,
             WS_EX_WINDOWEDGE, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SIZEBOX, WS_SYSMENU,
             WS_VISIBLE,
+            SetCursor, IDC_CROSS, IDC_HAND, IDC_HELP, IDC_IBEAM, IDC_NO, IDC_SIZEALL, IDC_SIZENESW,
+            IDC_SIZENS, IDC_SIZENWSE, IDC_SIZEWE, IDC_WAIT,
         },
     },
 };
@@ -213,6 +218,19 @@ pub const SAPP_MODIFIER_CTRL: u32 = 1 << 1;
 pub const SAPP_MODIFIER_ALT: u32 = 1 << 2;
 pub const SAPP_MODIFIER_SUPER: u32 = 1 << 3;
 
+pub const SAPP_CURSOR_DEFAULT: u32 = 0;
+pub const SAPP_CURSOR_HELP: u32 = 1;
+pub const SAPP_CURSOR_POINTER: u32 = 2;
+pub const SAPP_CURSOR_WAIT: u32 = 3;
+pub const SAPP_CURSOR_CROSSHAIR: u32 = 4;
+pub const SAPP_CURSOR_TEXT: u32 = 5;
+pub const SAPP_CURSOR_MOVE: u32 = 6;
+pub const SAPP_CURSOR_NOTALLOWED: u32 = 7;
+pub const SAPP_CURSOR_EWRESIZE: u32 = 8;
+pub const SAPP_CURSOR_NSRESIZE: u32 = 9;
+pub const SAPP_CURSOR_NESWRESIZE: u32 = 10;
+pub const SAPP_CURSOR_NWSERESIZE: u32 = 11;
+
 #[derive(Copy, Clone, Default)]
 pub struct sapp_event {
     pub frame_count: u64,
@@ -284,6 +302,7 @@ pub struct _sapp_state {
     pub cleanup_called: bool,
     pub quit_requested: bool,
     pub quit_ordered: bool,
+    pub cursor_grabbed: bool,
     pub window_title: String,
     pub frame_count: u64,
     pub mouse_x: f32,
@@ -307,6 +326,7 @@ static mut _sapp_opengl32: HINSTANCE = std::ptr::null_mut();
 static mut _sapp_gl_ctx: HGLRC = std::ptr::null_mut();
 static mut _sapp_win32_msg_hwnd: HWND = std::ptr::null_mut();
 static mut _sapp_win32_msg_dc: HDC = std::ptr::null_mut();
+static mut _sapp_cursor: HCURSOR = std::ptr::null_mut();
 static mut _sapp_ext_swap_control: bool = false;
 static mut _sapp_arb_multisample: bool = false;
 static mut _sapp_arb_pixel_format: bool = false;
@@ -351,6 +371,7 @@ static mut _sapp: _sapp_state = _sapp_state {
     cleanup_called: false,
     quit_requested: false,
     quit_ordered: false,
+    cursor_grabbed: false,
     window_title: String::new(),
     frame_count: 0,
     mouse_x: 0.,
@@ -464,10 +485,62 @@ pub unsafe fn sapp_mouse_shown() -> bool {
     cursor_info.flags & CURSOR_SHOWING != 0
 }
 
-pub unsafe fn sapp_set_cursor_grab(mut _grab: bool) {}
+pub unsafe fn sapp_set_cursor_grab(grab: bool) {
+    if grab == _sapp.cursor_grabbed {
+        return;
+    }
+
+    _sapp.cursor_grabbed = grab;
+
+    let mut rid: RAWINPUTDEVICE = RAWINPUTDEVICE {
+        usUsagePage: HID_USAGE_GENERIC_POINTER,
+        usUsage: HID_USAGE_GENERIC_MOUSE,
+        dwFlags: if grab { 0 } else { RIDEV_REMOVE },
+        hwndTarget: if grab { _sapp_win32_hwnd } else { NULL as _ },
+    };
+
+    if RegisterRawInputDevices(
+        &mut rid as *mut _ as _,
+        1,
+        std::mem::size_of::<RAWINPUTDEVICE>() as _,
+    ) != 1
+    {
+        if grab {
+            panic!("failed to register raw input device");
+        } else {
+            panic!("failed to remove raw input device");
+        }
+    }
+
+    if !grab {
+        ClipCursor(NULL as _);
+    }
+}
 
 pub unsafe fn sapp_show_mouse(shown: bool) {
     ShowCursor(shown as _);
+}
+
+pub unsafe fn sapp_set_mouse_cursor(cursor_icon: u32) {
+    let cursor_name = match cursor_icon {
+        SAPP_CURSOR_DEFAULT => IDC_ARROW,
+        SAPP_CURSOR_HELP => IDC_HELP,
+        SAPP_CURSOR_POINTER => IDC_HAND,
+        SAPP_CURSOR_WAIT => IDC_WAIT,
+        SAPP_CURSOR_CROSSHAIR => IDC_CROSS,
+        SAPP_CURSOR_TEXT => IDC_IBEAM,
+        SAPP_CURSOR_MOVE => IDC_SIZEALL,
+        SAPP_CURSOR_NOTALLOWED => IDC_NO,
+        SAPP_CURSOR_EWRESIZE => IDC_SIZEWE,
+        SAPP_CURSOR_NSRESIZE => IDC_SIZENS,
+        SAPP_CURSOR_NESWRESIZE => IDC_SIZENESW,
+        SAPP_CURSOR_NWSERESIZE => IDC_SIZENWSE,
+        _ => return,
+    };
+    _sapp_cursor = LoadCursorW(NULL as _, cursor_name);
+    SetCursor(_sapp_cursor);
+
+    _sapp.desc.user_cursor = cursor_icon != SAPP_CURSOR_DEFAULT;
 }
 
 unsafe fn _sapp_init_event(type_: sapp_event_type) {
@@ -566,6 +639,34 @@ unsafe fn _sapp_win32_key_event(type_: sapp_event_type, vk: u32, repeat: bool) {
     }
 }
 
+unsafe fn update_clip_rect(hWnd: HWND) {
+    // Retrieve the screen coordinates of the client area,
+    // and convert them into client coordinates.
+    let mut rect: RECT = std::mem::zeroed();
+
+    GetClientRect(hWnd, &mut rect as *mut _ as _);
+    let mut upper_left = POINT {
+        x: rect.left,
+        y: rect.top,
+    };
+    let mut lower_right = POINT {
+        x: rect.right,
+        y: rect.bottom,
+    };
+
+    ClientToScreen(hWnd, &mut upper_left as *mut _ as _);
+    ClientToScreen(hWnd, &mut lower_right as *mut _ as _);
+
+    SetRect(
+        &mut rect as *mut _ as _,
+        upper_left.x,
+        upper_left.y,
+        lower_right.x,
+        lower_right.y,
+    );
+    ClipCursor(&mut rect as *mut _ as _);
+}
+
 unsafe extern "system" fn win32_wndproc(
     hWnd: HWND,
     uMsg: UINT,
@@ -611,6 +712,10 @@ unsafe extern "system" fn win32_wndproc(
                 return 1;
             }
             WM_SIZE => {
+                if _sapp.cursor_grabbed {
+                    update_clip_rect(hWnd);
+                }
+
                 let iconified = wParam == SIZE_MINIMIZED;
                 if iconified != _sapp_win32_iconified {
                     _sapp_win32_iconified = iconified;
@@ -624,6 +729,7 @@ unsafe extern "system" fn win32_wndproc(
             WM_SETCURSOR => {
                 if _sapp.desc.user_cursor {
                     if LOWORD(lParam as _) == HTCLIENT as _ {
+                        SetCursor(_sapp_cursor);
                         _sapp_win32_app_event(sapp_event_type_SAPP_EVENTTYPE_UPDATE_CURSOR);
                         return 1;
                     }
@@ -671,11 +777,43 @@ unsafe extern "system" fn win32_wndproc(
                         sapp_mousebutton_SAPP_MOUSEBUTTON_INVALID,
                     );
                 }
+
                 _sapp_win32_mouse_event(
                     sapp_event_type_SAPP_EVENTTYPE_MOUSE_MOVE,
                     sapp_mousebutton_SAPP_MOUSEBUTTON_INVALID,
                 );
             }
+
+            WM_MOVE if _sapp.cursor_grabbed => {
+                update_clip_rect(hWnd);
+            }
+
+            WM_INPUT => {
+                let mut data: RAWINPUT = std::mem::zeroed();
+                let mut size = std::mem::size_of::<RAWINPUT>();
+                let get_succeed = GetRawInputData(
+                    lParam as _,
+                    RID_INPUT,
+                    &mut data as *mut _ as _,
+                    &mut size as *mut _ as _,
+                    std::mem::size_of::<RAWINPUTHEADER>() as _,
+                );
+                if get_succeed as i32 == -1 {
+                    panic!("failed to retrieve raw input data");
+                }
+
+                if data.data.mouse().usFlags & MOUSE_MOVE_ABSOLUTE == 1 {
+                    unimplemented!("Got MOUSE_MOVE_ABSOLUTE on WM_INPUT, related issue: https://github.com/not-fl3/miniquad/issues/165");
+                }
+
+                _sapp_init_event(sapp_event_type_SAPP_EVENTTYPE_RAW_DEVICE);
+                _sapp.event.mouse_dx = data.data.mouse().lLastX as f32 * _sapp_win32_mouse_scale;
+                _sapp.event.mouse_dy = data.data.mouse().lLastY as f32 * _sapp_win32_mouse_scale;
+                _sapp_call_event(&_sapp.event);
+
+                update_clip_rect(hWnd);
+            }
+
             WM_MOUSELEAVE => {
                 _sapp.win32_mouse_tracked = false;
                 _sapp_win32_mouse_event(
@@ -1536,4 +1674,8 @@ pub unsafe fn sapp_run(desc: *const sapp_desc) -> i32 {
     destroy_window();
 
     return 0 as i32;
+}
+
+pub unsafe fn sapp_is_elapsed_timer_supported() -> bool {
+    return true;
 }
